@@ -94,10 +94,9 @@ TEST_F(ExcludeUnpavedTest, UnpavedRoadsUnsupported) {
     EXPECT_EQ(gurka::detail::get_paths(result_0), gurka::detail::get_paths(result_1));
   }
 
-  // motor_scooter, motorcycle are unsupported costing models too, but the engine does not get routes
-  // through unpaved roads. These edges are not allowed in the Allowed and ReverseAllowed methods. It
-  // includes only roads that have surface greater than Surface::kDirt(See kMinimumMotorcycleSurface,
-  // kMinimumScooterSurface constants).
+  // motor_scooter is an unsupported costing model too, but the engine does not get routes through
+  // unpaved roads. These edges are not allowed in the Allowed and ReverseAllowed methods. It includes
+  // only roads that have surface greater than Surface::kDirt(See kMinimumScooterSurface constant).
 }
 
 TEST_F(ExcludeUnpavedTest, UnpavedRoadsInTheBeginning) {
@@ -141,6 +140,55 @@ TEST_F(ExcludeUnpavedTest, UnpavedRoadsInTheEnd) {
     const auto result = gurka::do_action(valhalla::Options::route, map, {"G", "A"}, costing,
                                          {{"/costing_options/" + costing + "/exclude_unpaved", "1"}});
     gurka::assert::raw::expect_path(result, {"GH", "HI", "IA"});
+  }
+}
+
+TEST(Standalone, ExcludeUnpavedMotorcycle) {
+  // the paved detour has to be long: motorcycle's surface penalty already avoids short unpaved edges,
+  // the gravel is only used without exclude_unpaved if it saves a lot of distance
+  const std::string ascii_map = R"(
+    A-B-C-D
+      | |
+      | |
+      | |
+      | |
+      | |
+      | |
+      | |
+      | |
+      | |
+      | |
+      | |
+      | |
+      E-F
+  )";
+
+  const gurka::ways ways = {
+      {"AB", {{"highway", "residential"}}},
+      {"BC", {{"highway", "residential"}, {"surface", "gravel"}}},
+      {"CD", {{"highway", "residential"}}},
+      {"BE", {{"highway", "residential"}}},
+      {"EF", {{"highway", "residential"}}},
+      {"FC", {{"highway", "residential"}}},
+  };
+
+  const auto layout = gurka::detail::map_to_coordinates(ascii_map, 100.);
+  const auto map = gurka::buildtiles(layout, ways, {}, {}, "test/data/exclude_unpaved_motorcycle");
+
+  // no date_time runs bidirectional A*, depart_at only uses Allowed, arrive_by only AllowedReverse
+  const std::vector<std::unordered_map<std::string, std::string>> searches = {
+      {},
+      {{"/date_time/type", "1"}, {"/date_time/value", "2026-11-05T08:00"}},
+      {{"/date_time/type", "2"}, {"/date_time/value", "2026-11-05T08:00"}},
+  };
+
+  for (auto options : searches) {
+    auto result = gurka::do_action(valhalla::Options::route, map, {"A", "D"}, "motorcycle", options);
+    gurka::assert::raw::expect_path(result, {"AB", "BC", "CD"});
+
+    options["/costing_options/motorcycle/exclude_unpaved"] = "1";
+    result = gurka::do_action(valhalla::Options::route, map, {"A", "D"}, "motorcycle", options);
+    gurka::assert::raw::expect_path(result, {"AB", "BE", "EF", "FC", "CD"});
   }
 }
 
